@@ -1,167 +1,199 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Link } from "react-router-dom";
-import { searchPositions, getApplicableCompetencies, COMPETENCIES } from "../lib/dataStore";
-import { createSession } from "../lib/sessions";
+import { searchPositions, getApplicableCompetencies } from "../lib/dataStore";
+import { createSession, deleteSession } from "../lib/sessions";
 import { auth } from "../firebase";
 
+function emptyRow(id) {
+  return {
+    id,
+    nama: "",
+    nik: "",
+    tanggalProses: new Date().toISOString().slice(0, 10),
+    jenisPengukuran: "Profiling",
+    jabatanQuery: "",
+    jabatanResults: [],
+    position: null,
+    kodeAkses: null,
+    generating: false,
+    error: null,
+  };
+}
+
 export default function AdminSetup() {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState([]);
-  const [position, setPosition] = useState(null);
-  const [jenisPengukuran, setJenisPengukuran] = useState("Profiling");
-  const [checkedKeys, setCheckedKeys] = useState([]);
-  const [generatedCode, setGeneratedCode] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
+  const nextId = useRef(1);
+  const [rows, setRows] = useState([emptyRow(0)]);
 
-  function onSearchChange(v) {
-    setQuery(v);
-    setResults(v.trim().length >= 2 ? searchPositions(v) : []);
+  function addRow() {
+    nextId.current += 1;
+    setRows((prev) => [...prev, emptyRow(nextId.current)]);
   }
 
-  function selectPosition(p) {
-    setPosition(p);
-    setQuery("");
-    setResults([]);
-    const keys = getApplicableCompetencies(p);
-    setCheckedKeys(keys); // default: semua tercentang
+  function updateRow(id, patch) {
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
 
-  function toggleKey(key) {
-    setCheckedKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  function onJabatanSearch(id, value) {
+    const results = value.trim().length >= 2 ? searchPositions(value) : [];
+    updateRow(id, { jabatanQuery: value, jabatanResults: results });
   }
 
-  async function handleGenerate() {
-    if (!position || checkedKeys.length === 0) return;
-    setSaving(true);
-    setError(null);
+  function selectJabatan(id, position) {
+    updateRow(id, { position, jabatanQuery: "", jabatanResults: [] });
+  }
+
+  async function handleGenerate(id) {
+    const row = rows.find((r) => r.id === id);
+    if (!row.nama || !row.nik || !row.position) {
+      updateRow(id, { error: "Lengkapi Nama, NIK, dan Jabatan dulu." });
+      return;
+    }
+    updateRow(id, { generating: true, error: null });
     try {
+      const applicableKeys = getApplicableCompetencies(row.position);
+      if (applicableKeys.length === 0) {
+        updateRow(id, { generating: false, error: "Jabatan ini tidak punya kompetensi dengan rubrik lengkap di sistem." });
+        return;
+      }
       const requiredLevels = {};
-      checkedKeys.forEach((k) => (requiredLevels[k] = position.competencies[k] || "Intermediate"));
-      const kode = await createSession({
-        position,
-        jenisPengukuran,
-        selectedCompetencyKeys: checkedKeys,
+      applicableKeys.forEach((k) => (requiredLevels[k] = row.position.competencies[k] || "Intermediate"));
+
+      const kodeAkses = await createSession({
+        position: row.position,
+        jenisPengukuran: row.jenisPengukuran,
+        applicableCompetencyKeys: applicableKeys,
         requiredLevels,
+        participant: { nama: row.nama, nik: row.nik, tanggalProses: row.tanggalProses },
         createdBy: auth.currentUser?.email || "admin",
       });
-      setGeneratedCode(kode);
+      updateRow(id, { kodeAkses, generating: false });
     } catch (e) {
-      setError("Gagal membuat sesi: " + e.message);
-    } finally {
-      setSaving(false);
+      updateRow(id, { generating: false, error: "Gagal generate: " + e.message });
     }
   }
 
-  if (generatedCode) {
-    return (
-      <div className="page">
-        <p className="eyebrow">Admin &middot; Setup Sesi</p>
-        <h1>Sesi berhasil dibuat</h1>
-        <div className="card" style={{ background: "var(--accent-soft)", borderColor: "var(--accent)" }}>
-          <p style={{ margin: 0, fontSize: 13 }}>Kode Akses untuk peserta:</p>
-          <p style={{ fontSize: 32, fontWeight: 700, letterSpacing: "0.08em", margin: "6px 0" }}>{generatedCode}</p>
-          <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)" }}>
-            Bagikan kode ini ke peserta. Peserta akan mengisi data dirinya sendiri setelah login.
-          </p>
-        </div>
-        <div className="row">
-          <button onClick={() => window.location.reload()}>Buat Sesi Lain</button>
-          <Link to="/admin/sesi"><button className="primary">Lihat Semua Sesi</button></Link>
-        </div>
-      </div>
-    );
+  async function handleHapus(id) {
+    const row = rows.find((r) => r.id === id);
+    if (row.kodeAkses) {
+      if (!window.confirm(`Hapus kode akses ${row.kodeAkses}? Data wawancara yang sudah dimulai (kalau ada) akan ikut terhapus.`)) return;
+      try {
+        await deleteSession(row.kodeAkses);
+      } catch (e) {
+        updateRow(id, { error: "Gagal menghapus: " + e.message });
+        return;
+      }
+    }
+    setRows((prev) => (prev.length === 1 ? [emptyRow(0)] : prev.filter((r) => r.id !== id)));
   }
 
   return (
-    <div className="page">
+    <div className="page" style={{ maxWidth: 980 }}>
       <p className="eyebrow">Admin &middot; Setup Sesi</p>
-      <h1>Buat Sesi Wawancara</h1>
+      <div className="row between">
+        <h1>Buat Sesi Wawancara</h1>
+        <Link to="/admin/sesi"><button>Lihat Semua Sesi</button></Link>
+      </div>
       <p className="note">
-        Cari jabatan — sistem otomatis menampilkan kompetensi yang melekat beserta level yang dipersyaratkan.
-        Peserta tidak akan melihat nama kompetensi ini saat wawancara berlangsung.
+        Isi data tiap peserta di bawah — jabatan boleh berbeda-beda per baris. Kompetensi yang diuji otomatis
+        mengikuti semua kompetensi yang melekat pada jabatan yang dipilih (dengan level yang dipersyaratkan
+        dari data jabatan). Klik "Generate" per baris untuk membuat kode aksesnya.
       </p>
 
-      <label htmlFor="jenisPengukuran">Jenis Pengukuran</label>
-      <select id="jenisPengukuran" value={jenisPengukuran} onChange={(e) => setJenisPengukuran(e.target.value)}>
-        <option value="Profiling">Profiling (kompetensi jabatan saat ini)</option>
-        <option value="Assessment">Assessment (kompetensi jabatan tujuan)</option>
-      </select>
+      {rows.map((row, idx) => (
+        <div key={row.id} className="card">
+          <div className="row between" style={{ marginBottom: 4 }}>
+            <strong style={{ fontSize: 13, color: "var(--text-muted)" }}>Peserta #{idx + 1}</strong>
+            <button onClick={() => handleHapus(row.id)} className="danger" style={{ padding: "4px 10px", fontSize: 12 }}>
+              Hapus
+            </button>
+          </div>
 
-      <label htmlFor="jabatanSearch">
-        Cari Jabatan {jenisPengukuran === "Assessment" ? "Tujuan" : "Saat Ini"} (nama atau kode posisi)
-      </label>
-      <input
-        id="jabatanSearch"
-        type="text"
-        placeholder="Contoh: Store Manager, atau kode T7060..."
-        value={query}
-        onChange={(e) => onSearchChange(e.target.value)}
-        autoComplete="off"
-      />
-      {results.length > 0 && (
-        <div className="result-list">
-          {results.map((p) => (
-            <div key={p.code} className="result-item" onClick={() => selectPosition(p)}>
+          {row.kodeAkses ? (
+            <div className="row between" style={{ alignItems: "center" }}>
               <div>
-                <strong>{p.name}</strong>
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {p.code} &middot; {p.division || "-"} &middot; Grade {p.grade || "-"}
+                <div><strong>{row.nama}</strong> &middot; {row.position.name}</div>
+                <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{row.jenisPengukuran} &middot; NIK {row.nik}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Kode Akses</div>
+                <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "0.06em" }}>{row.kodeAkses}</div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+                <div>
+                  <label>Nama</label>
+                  <input type="text" value={row.nama} onChange={(e) => updateRow(row.id, { nama: e.target.value })} />
+                </div>
+                <div>
+                  <label>NIK</label>
+                  <input type="text" value={row.nik} onChange={(e) => updateRow(row.id, { nik: e.target.value })} />
+                </div>
+                <div>
+                  <label>Tanggal Proses</label>
+                  <input type="date" value={row.tanggalProses} onChange={(e) => updateRow(row.id, { tanggalProses: e.target.value })} />
+                </div>
+                <div>
+                  <label>Jenis Pengukuran</label>
+                  <select value={row.jenisPengukuran} onChange={(e) => updateRow(row.id, { jenisPengukuran: e.target.value })}>
+                    <option value="Profiling">Profiling (jabatan saat ini)</option>
+                    <option value="Assessment">Assessment (jabatan tujuan)</option>
+                  </select>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
 
-      {position && (
-        <>
-          <div className="card row between" style={{ marginTop: 14 }}>
-            <div>
-              <strong>{position.name}</strong>
-              <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
-                {position.code} &middot; {position.division || "-"} &middot; {position.levelJabatan || "-"}
-              </div>
-            </div>
-            <button onClick={() => { setPosition(null); setCheckedKeys([]); }}>Ganti</button>
-          </div>
-
-          <label>Kompetensi yang diuji (otomatis tercentang sesuai data, bisa dikurangi)</label>
-          <div className="result-list">
-            {getApplicableCompetencies(position).map((key) => {
-              const c = COMPETENCIES[key];
-              const lvl = position.competencies[key];
-              return (
-                <label key={key} className="result-item" style={{ cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={checkedKeys.includes(key)}
-                    onChange={() => toggleKey(key)}
-                    style={{ marginTop: 3 }}
-                  />
+              <label>Jabatan untuk Diukur</label>
+              {row.position ? (
+                <div className="row between" style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "8px 12px" }}>
                   <div>
-                    <strong>{c.name}</strong> <span className="badge Intermediate">{lvl}</span>
-                    <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
-                      {c.cluster} &middot; {c.keyBehaviours.length} indikator
+                    <strong>{row.position.name}</strong>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                      {row.position.code} &middot; Grade {row.position.grade || "-"} &middot; {getApplicableCompetencies(row.position).length} kompetensi akan diuji
                     </div>
                   </div>
-                </label>
-              );
-            })}
-          </div>
+                  <button onClick={() => updateRow(row.id, { position: null })}>Ganti</button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    placeholder="Cari nama atau kode jabatan..."
+                    value={row.jabatanQuery}
+                    onChange={(e) => onJabatanSearch(row.id, e.target.value)}
+                    autoComplete="off"
+                  />
+                  {row.jabatanResults.length > 0 && (
+                    <div className="result-list">
+                      {row.jabatanResults.map((p) => (
+                        <div key={p.code} className="result-item" onClick={() => selectJabatan(row.id, p)}>
+                          <div>
+                            <strong>{p.name}</strong>
+                            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{p.code} &middot; Grade {p.grade || "-"} &middot; {p.division || "-"}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
 
-          {error && <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p>}
+              {row.error && <p style={{ color: "var(--danger)", fontSize: 13 }}>{row.error}</p>}
 
-          <button
-            className="primary"
-            style={{ width: "100%", marginTop: 20, padding: 13 }}
-            disabled={checkedKeys.length === 0 || saving}
-            onClick={handleGenerate}
-          >
-            {saving ? "Membuat sesi..." : "Generate Kode Akses"}
-          </button>
-        </>
-      )}
+              <button
+                className="primary"
+                style={{ marginTop: 12 }}
+                disabled={row.generating}
+                onClick={() => handleGenerate(row.id)}
+              >
+                {row.generating ? "Membuat..." : "Generate Kode Akses"}
+              </button>
+            </>
+          )}
+        </div>
+      ))}
+
+      <button onClick={addRow} style={{ width: "100%", padding: 12 }}>+ Tambah Peserta</button>
     </div>
   );
 }

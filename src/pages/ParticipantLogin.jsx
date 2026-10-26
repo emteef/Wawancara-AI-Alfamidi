@@ -24,8 +24,10 @@ export default function ParticipantLogin() {
         setError("Sesi ini sudah selesai dan dikunci. Hubungi assessor Anda jika ada pertanyaan.");
         return;
       }
-      // Sudah pernah isi biodata? langsung lanjut sesuai progress.
-      if (!session.participant) {
+      // Data dasar (nama, NIK, jabatan) sudah diisi admin sejak kode akses dibuat.
+      // Cabang baru diisi peserta sendiri di halaman biodata — jadi itu jadi penanda
+      // apakah peserta sudah melewati langkah konfirmasi data diri atau belum.
+      if (!session.participant?.cabang) {
         navigate(`/peserta/biodata/${kode}`);
       } else {
         navigate(`/peserta/pengantar/${kode}`);

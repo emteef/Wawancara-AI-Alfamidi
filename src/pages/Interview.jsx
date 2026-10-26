@@ -25,7 +25,7 @@ export default function Interview() {
   const [selectedKeys, setSelectedKeys] = useState([]);
   const [compIndex, setCompIndex] = useState(0);
   const [turns, setTurns] = useState([]);
-  const [transcriptView, setTranscriptView] = useState([]); // { role, text } untuk render
+  const [transcriptView, setTranscriptView] = useState([]);
   const [answerText, setAnswerText] = useState("");
   const [thinking, setThinking] = useState(false);
   const [sending, setSending] = useState(false);
@@ -39,14 +39,18 @@ export default function Interview() {
 
   const sessionStartTime = useRef(Date.now());
   const segmentStartTime = useRef(Date.now());
-  const turnsRef = useRef([]); // mirror turns untuk dipakai di closure async
+  const turnsRef = useRef([]);
 
   useEffect(() => {
     turnsRef.current = turns;
   }, [turns]);
 
+  const initializedFor = useRef(null);
+
   // ---------- Load sesi & tentukan titik resume ----------
   useEffect(() => {
+    if (initializedFor.current === kodeAkses) return; // cegah StrictMode double-invoke di dev
+    initializedFor.current = kodeAkses;
     (async () => {
       const s = await getSession(kodeAkses);
       if (!s) { setError("Sesi tidak ditemukan."); setLoadingInitial(false); return; }
@@ -60,7 +64,6 @@ export default function Interview() {
       setCompIndex(startIdx);
 
       if (startIdx >= keys.length) {
-        // semua kompetensi sudah selesai dibahas tapi belum di-coding -> langsung finalize
         setLoadingInitial(false);
         runFinish(keys, s);
         return;
@@ -202,7 +205,6 @@ export default function Interview() {
           const data = await askGeminiJSON(prompt);
           if (Array.isArray(data)) await saveAiCoding(kodeAkses, key, data);
         } catch (e) {
-          // dibiarkan kosong -> assessor akan lihat "tidak ada data" dan bisa nilai manual
           console.error("Gagal coding kompetensi", key, e);
         }
       })
@@ -215,6 +217,11 @@ export default function Interview() {
 
   function handleJeda() {
     navigate("/peserta");
+  }
+
+  async function handleAkhiri() {
+    if (!window.confirm("Akhiri wawancara sekarang? Kompetensi yang belum sempat dibahas akan ditandai belum dibahas, dan yang sudah dibahas akan langsung dinilai.")) return;
+    await runFinish(selectedKeys, session);
   }
 
   if (loadingInitial) return <div className="page"><p>Memuat sesi...</p></div>;
@@ -255,6 +262,7 @@ export default function Interview() {
         </button>
         <button className="primary" onClick={handleSend} disabled={sending || thinking}>Kirim</button>
         <div style={{ flex: 1 }} />
+        <button onClick={handleAkhiri}>Akhiri Wawancara</button>
         <button onClick={handleJeda}>Jeda &amp; Lanjutkan Nanti</button>
       </div>
       <p className="hint">{hint}</p>

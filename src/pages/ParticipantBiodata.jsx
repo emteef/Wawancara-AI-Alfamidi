@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getSession, saveParticipantData } from "../lib/sessions";
+import { getSession, updateParticipantData } from "../lib/sessions";
 
 export default function ParticipantBiodata() {
   const { kodeAkses } = useParams();
   const navigate = useNavigate();
   const [session, setSession] = useState(null);
-  const [form, setForm] = useState({ nama: "", nik: "", cabang: "", jabatanSaatIni: "", jabatanTujuan: "", tanggalProses: "" });
+  const [nama, setNama] = useState("");
+  const [jabatanTampil, setJabatanTampil] = useState("");
+  const [cabang, setCabang] = useState("");
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -14,29 +16,19 @@ export default function ParticipantBiodata() {
     getSession(kodeAkses).then((s) => {
       if (!s) { setError("Sesi tidak ditemukan."); return; }
       setSession(s);
-      setForm((f) => ({ ...f, tanggalProses: new Date().toISOString().slice(0, 10) }));
+      setNama(s.participant?.nama || "");
+      setJabatanTampil(s.participant?.jabatanTampil || s.positionName || "");
+      setCabang(s.participant?.cabang || "");
     });
   }, [kodeAkses]);
 
-  function update(field, value) {
-    setForm((f) => ({ ...f, [field]: value }));
-  }
-
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!form.nama || !form.nik || !form.cabang) return;
-    if (session.jenisPengukuran === "Assessment" && !form.jabatanTujuan) return;
+    if (!nama || !jabatanTampil || !cabang) return;
     setSaving(true);
     setError(null);
     try {
-      await saveParticipantData(kodeAkses, {
-        ...form,
-        // jabatan & jenisPengukuran mengikuti setting assessor, bukan input bebas peserta,
-        // kecuali jabatanSaatIni/jabatanTujuan yang memang perlu diisi peserta sebagai konteks.
-        jenisPengukuran: session.jenisPengukuran,
-        jabatanDiujiCode: session.positionCode,
-        jabatanDiujiNama: session.positionName,
-      });
+      await updateParticipantData(kodeAkses, { nama, jabatanTampil, cabang });
       navigate(`/peserta/pengantar/${kodeAkses}`);
     } catch (e2) {
       setError("Gagal menyimpan: " + e2.message);
@@ -51,34 +43,21 @@ export default function ParticipantBiodata() {
   return (
     <div className="page">
       <p className="eyebrow">Data Diri Peserta</p>
-      <h1>Lengkapi Data Diri</h1>
+      <h1>Konfirmasi Data Diri</h1>
       <p className="note">
-        Jenis Pengukuran: <strong>{session.jenisPengukuran}</strong> &middot; Jabatan yang diuji: <strong>{session.positionName}</strong>
-        {" "}(ditentukan oleh assessor, tidak bisa diubah di sini)
+        NIK: <strong>{session.participant?.nik}</strong> &middot; Tanggal Proses: <strong>{session.participant?.tanggalProses}</strong> &middot; Jenis Pengukuran: <strong>{session.jenisPengukuran}</strong>
+        <br />Nama dan Jabatan sudah diisi assessor — boleh dikoreksi kalau ada yang salah. Kompetensi yang diuji tetap mengikuti jabatan yang ditentukan assessor, tidak berubah walau Anda koreksi teks jabatan di bawah.
       </p>
 
       <form onSubmit={handleSubmit}>
         <label htmlFor="nama">Nama Lengkap</label>
-        <input id="nama" type="text" value={form.nama} onChange={(e) => update("nama", e.target.value)} required />
+        <input id="nama" type="text" value={nama} onChange={(e) => setNama(e.target.value)} required />
 
-        <label htmlFor="nik">NIK (Nomor Induk Karyawan)</label>
-        <input id="nik" type="text" value={form.nik} onChange={(e) => update("nik", e.target.value)} required />
+        <label htmlFor="jabatan">Jabatan</label>
+        <input id="jabatan" type="text" value={jabatanTampil} onChange={(e) => setJabatanTampil(e.target.value)} required />
 
         <label htmlFor="cabang">Cabang</label>
-        <input id="cabang" type="text" value={form.cabang} onChange={(e) => update("cabang", e.target.value)} required />
-
-        <label htmlFor="jabatanSaatIni">Jabatan Saat Ini</label>
-        <input id="jabatanSaatIni" type="text" value={form.jabatanSaatIni} onChange={(e) => update("jabatanSaatIni", e.target.value)} required />
-
-        {session.jenisPengukuran === "Assessment" && (
-          <>
-            <label htmlFor="jabatanTujuan">Jabatan Tujuan</label>
-            <input id="jabatanTujuan" type="text" value={form.jabatanTujuan} onChange={(e) => update("jabatanTujuan", e.target.value)} required />
-          </>
-        )}
-
-        <label htmlFor="tanggalProses">Tanggal Proses</label>
-        <input id="tanggalProses" type="date" value={form.tanggalProses} onChange={(e) => update("tanggalProses", e.target.value)} required />
+        <input id="cabang" type="text" value={cabang} onChange={(e) => setCabang(e.target.value)} placeholder="Isi cabang tempat Anda bertugas" required />
 
         {error && <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p>}
 

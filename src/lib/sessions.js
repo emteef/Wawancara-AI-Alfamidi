@@ -1,25 +1,22 @@
 import {
-  doc, setDoc, getDoc, updateDoc, collection, getDocs,
+  doc, setDoc, getDoc, updateDoc, deleteDoc, collection, getDocs,
   query, orderBy, serverTimestamp, arrayUnion,
 } from "firebase/firestore";
 import { db } from "../firebase";
 
 function randomCode(len = 7) {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // tanpa karakter ambigu (0/O, 1/I)
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let out = "";
   for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
   return out;
 }
 
-const sessionRef = (kodeAkses) => doc(db, "sessions", kodeAkses);
+const sessionRef = (k) => doc(db, "sessions", k);
 
-/** Dipanggil dari halaman Admin Setup setelah assessor pilih jabatan + kompetensi. */
-export async function createSession({ position, jenisPengukuran, selectedCompetencyKeys, requiredLevels, createdBy }) {
+export async function createSession({ position, jenisPengukuran, applicableCompetencyKeys, requiredLevels, participant, createdBy }) {
   let kodeAkses = randomCode();
-  // best-effort hindari tabrakan kode (jarang terjadi, tapi dicek sekali)
-  const existing = await getDoc(sessionRef(kodeAkses));
-  if (existing.exists()) kodeAkses = randomCode();
-
+  const ex = await getDoc(sessionRef(kodeAkses));
+  if (ex.exists()) kodeAkses = randomCode();
   await setDoc(sessionRef(kodeAkses), {
     status: "belum_dipakai",
     createdAt: serverTimestamp(),
@@ -27,79 +24,68 @@ export async function createSession({ position, jenisPengukuran, selectedCompete
     positionCode: position.code,
     positionName: position.name,
     jenisPengukuran,
-    selectedCompetencyKeys,
-    requiredLevels, // { competencyKey: 'Basic'|'Intermediate'|'Advance' }
-    participant: null,
-    segments: {}, // competencyKey -> { turns: [...], completedAt, cappedByTime }
-    aiCoding: {}, // competencyKey -> [{ keyBehaviour, level, evidence, reasoning }]
-    assessorReview: {}, // competencyKey -> { finalResults, nilaiFinal, finalizedAt, finalizedBy }
+    selectedCompetencyKeys: applicableCompetencyKeys,
+    requiredLevels,
+    participant: {
+      nama: participant.nama,
+      nik: participant.nik,
+      tanggalProses: participant.tanggalProses,
+      cabang: null,
+      jabatanTampil: position.name,
+    },
+    segments: {},
+    aiCoding: {},
+    assessorReview: {},
     auditLog: [],
   });
   return kodeAkses;
 }
 
-export async function getSession(kodeAkses) {
-  const snap = await getDoc(sessionRef(kodeAkses));
-  if (!snap.exists()) return null;
-  return { id: snap.id, ...snap.data() };
+export async function deleteSession(k) { await deleteDoc(sessionRef(k)); }
+
+export async function getSession(k) {
+  const s = await getDoc(sessionRef(k));
+  return s.exists() ? { id: s.id, ...s.data() } : null;
 }
 
-export async function saveParticipantData(kodeAkses, participant) {
-  await updateDoc(sessionRef(kodeAkses), {
-    participant: { ...participant, filledAt: serverTimestamp() },
+export async function updateParticipantData(k, { nama, jabatanTampil, cabang }) {
+  await updateDoc(sessionRef(k), {
+    "participant.nama": nama,
+    "participant.jabatanTampil": jabatanTampil,
+    "participant.cabang": cabang,
+    "participant.filledAt": serverTimestamp(),
     status: "berjalan",
   });
 }
 
-/** Simpan progress percakapan satu kompetensi (dipanggil tiap giliran, untuk auto-save). */
-export async function saveSegmentTurns(kodeAkses, competencyKey, turns, extra = {}) {
-  await updateDoc(sessionRef(kodeAkses), {
-    [`segments.${competencyKey}`]: { turns, ...extra },
-  });
+export async function saveSegmentTurns(k, ck, turns, extra = {}) {
+  await updateDoc(sessionRef(k), { [`segments.${ck}`]: { turns, ...extra } });
 }
 
-export async function saveAiCoding(kodeAkses, competencyKey, results) {
-  await updateDoc(sessionRef(kodeAkses), {
-    [`aiCoding.${competencyKey}`]: results,
-  });
+export async function saveAiCoding(k, ck, results) {
+  await updateDoc(sessionRef(k), { [`aiCoding.${ck}`]: results });
 }
 
-export async function markSessionSelesai(kodeAkses) {
-  await updateDoc(sessionRef(kodeAkses), { status: "selesai" });
+export async function markSessionSelesai(k) { await updateDoc(sessionRef(k), { status: "selesai" }); }
+
+export async function saveAssessorReview(k, ck, finalResults, nilaiFinal) {
+  await updateDoc(sessionRef(k), { [`assessorReview.${ck}`]: { finalResults, nilaiFinal, finalizedAt: null } });
 }
 
-/** Assessor menyimpan hasil review (belum final, masih bisa diubah bebas). */
-export async function saveAssessorReview(kodeAkses, competencyKey, finalResults, nilaiFinal) {
-  await updateDoc(sessionRef(kodeAkses), {
-    [`assessorReview.${competencyKey}`]: { finalResults, nilaiFinal, finalizedAt: null },
-  });
+export async function finalizeSession(k, by) {
+  await updateDoc(sessionRef(k), { status: "final", auditLog: arrayUnion({ action: "finalize", by, at: new Date().toISOString() }) });
 }
 
-/** Kunci hasil (finalisasi). */
-export async function finalizeSession(kodeAkses, by) {
-  await updateDoc(sessionRef(kodeAkses), {
-    status: "final",
-    auditLog: arrayUnion({ action: "finalize", by, at: new Date().toISOString() }),
-  });
+export async function unlockSession(k, by, reason) {
+  await updateDoc(sessionRef(k), { status: "selesai", auditLog: arrayUnion({ action: "unlock", by, at: new Date().toISOString(), reason: reason || null }) });
 }
 
-/** Buka kunci untuk edit setelah finalisasi — WAJIB tercatat di audit log. */
-export async function unlockSession(kodeAkses, by, reason) {
-  await updateDoc(sessionRef(kodeAkses), {
-    status: "selesai",
-    auditLog: arrayUnion({ action: "unlock", by, at: new Date().toISOString(), reason: reason || null }),
-  });
+export async function logAuditEdit(k, by, detail) {
+  await updateDoc(sessionRef(k), { auditLog: arrayUnion({ action: "edit", by, at: new Date().toISOString(), detail }) });
 }
 
-export async function logAuditEdit(kodeAkses, by, detail) {
-  await updateDoc(sessionRef(kodeAkses), {
-    auditLog: arrayUnion({ action: "edit", by, at: new Date().toISOString(), detail }),
-  });
-}
-
-/** Daftar semua sesi untuk dashboard admin (urut terbaru dulu). */
 export async function listSessions() {
   const q = query(collection(db, "sessions"), orderBy("createdAt", "desc"));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const s = await getDocs(q);
+  return s.docs.map((d) => ({ id: d.id, ...d.data() }));
 }

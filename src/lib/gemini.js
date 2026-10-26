@@ -4,7 +4,7 @@
 // batasi hanya domain Firebase Hosting produksi yang boleh memakai key ini.
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const MODEL = import.meta.env.VITE_GEMINI_MODEL || "gemini-2.5-flash";
+const MODEL = import.meta.env.VITE_GEMINI_MODEL || "gemini-3.6-flash";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
 
 /**
