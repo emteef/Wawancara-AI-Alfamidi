@@ -22,7 +22,7 @@ h1, h2, h3 { font-family: 'Source Serif 4', Georgia, serif; font-weight: 600; ma
   border-radius: 8px; padding: 10px 12px; margin-bottom: 20px;
 }
 label { display: block; font-size: 13px; color: var(--text-muted); margin: 16px 0 6px; }
-input[type=text], input[type=password], input[type=date], select, textarea {
+input[type=text], input[type=email], input[type=password], input[type=date], select, textarea {
   width: 100%; font-family: inherit; font-size: 15px; padding: 10px 13px;
   border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text);
 }
@@ -73,3 +73,17 @@ th { color: var(--text-muted); font-weight: 500; }
 .row { display: flex; gap: 10px; align-items: center; }
 .row.between { justify-content: space-between; }
 .audit-log { font-size: 12px; color: var(--text-muted); margin-top: 10px; }
+
+/* Navigasi admin */
+.admin-nav { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
+.admin-nav-inner { max-width: 960px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+.admin-brand { font-family: 'Source Serif 4', Georgia, serif; font-weight: 600; color: var(--accent); padding: 14px 0; }
+.admin-tabs { display: flex; gap: 4px; align-self: stretch; }
+.admin-tab {
+  display: flex; align-items: center; padding: 0 16px; font-size: 14px; font-weight: 500;
+  color: var(--text-muted); text-decoration: none; border-bottom: 3px solid transparent; margin-bottom: -1px;
+}
+.admin-tab:hover { color: var(--text); background: var(--accent-soft); }
+.admin-tab.active { color: var(--accent); border-bottom-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.admin-user { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-muted); padding: 8px 0; }
+.admin-user button { padding: 6px 12px; font-size: 13px; }

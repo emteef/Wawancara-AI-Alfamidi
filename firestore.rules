@@ -1,42 +1,27 @@
 rules_version = '2';
 
-// CATATAN: draf awal. Sebelum produksi, sesuaikan dengan cara Anda menandai role assessor
-// (mis. custom claim di Firebase Auth, atau collection terpisah 'assessors/{uid}').
-// Contoh di bawah mengasumsikan ada dokumen di collection 'assessors' dengan ID = uid assessor.
-
+// Daftar email assessor/admin yang boleh mengelola data.
 function isAssessor() {
   return request.auth != null &&
-    exists(/databases/$(database)/documents/assessors/$(request.auth.uid));
+    request.auth.token.email in ['emteef.business@gmail.com', 'assessment.homui@gmail.com'];
 }
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    match /assessors/{uid} {
-      // Hanya assessor yang sudah terdaftar (oleh admin lain / manual) yang bisa baca profil sendiri.
-      allow read: if request.auth != null && request.auth.uid == uid;
-      allow write: if false; // dikelola manual / lewat Admin SDK, bukan dari client
-    }
-
     match /sessions/{kodeAkses} {
-      // Peserta TIDAK butuh login formal — akses dikontrol lewat kerahasiaan kode akses,
-      // jadi read/write terbatas ke field tertentu tanpa memerlukan auth peserta.
-      // Ini trade-off yang disengaja (UX peserta lebih sederhana), TAPI berarti siapa pun yang
-      // tahu kode akses bisa akses sesi itu — pastikan kode akses cukup acak (lihat sessions.js)
-      // dan tidak dibagikan lewat kanal publik.
+      // Peserta tidak login; aksesnya dikontrol oleh kerahasiaan kode akses.
+      allow get: if true;
+      allow list: if isAssessor();
+      allow create: if isAssessor();
+      allow delete: if isAssessor();
 
-      allow get: if true; // perlu, supaya peserta bisa validasi kode akses & lanjut sesi
-      allow list: if isAssessor(); // hanya assessor yang boleh lihat daftar semua sesi
-
-      // Peserta boleh update field dirinya sendiri (biodata, segments) tapi TIDAK boleh
-      // mengubah assessorReview, aiCoding, atau status jadi "final" / auditLog.
+      // Peserta hanya boleh mengubah field dirinya, bukan review/audit, dan tidak boleh 'final'.
       allow update: if isAssessor() ||
         (request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['participant', 'segments', 'status']) &&
+          .hasOnly(['participant', 'segments', 'aiCoding', 'status']) &&
+         resource.data.status != 'final' &&
          request.resource.data.status != 'final');
-
-      allow create: if isAssessor();
-      allow delete: if false; // retensi 12 bulan ditangani proses terpisah, bukan delete langsung oleh siapa pun
     }
   }
 }

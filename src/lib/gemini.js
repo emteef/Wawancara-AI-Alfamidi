@@ -18,11 +18,19 @@ export async function askGemini(turns) {
     parts: [{ text: t.content }],
   }));
 
-  const res = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents }),
-  });
+  // Coba ulang otomatis jika server Google sibuk (429/500/503/504), jeda bertahap 2s, 4s, 8s, 12s.
+  const RETRYABLE = [429, 500, 503, 504];
+  const DELAYS = [2000, 4000, 8000, 12000];
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    res = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents }),
+    });
+    if (res.ok || !RETRYABLE.includes(res.status) || attempt >= DELAYS.length) break;
+    await new Promise((r) => setTimeout(r, DELAYS[attempt]));
+  }
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
